@@ -30,7 +30,7 @@ jobs:
           git config --global --add safe.directory '*'
           cmake -H. -Bbuild-wiiu -GNinja -DCMAKE_TOOLCHAIN_FILE=$DEVKITPRO/cmake/WiiU.cmake -DCMAKE_BUILD_TYPE:STRING=Release
       - name: Build
-        run: cmake --build build-wiiu --target soh_wuhb -j4 2>&1 | tee build.log
+        run: cmake --build build-wiiu --target soh_wuhb -j4 -- -k 0 2>&1 | tee build.log
         shell: bash -o pipefail {0}
       - name: Upload build log
         if: always()
