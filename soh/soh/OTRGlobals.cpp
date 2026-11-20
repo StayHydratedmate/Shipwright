@@ -3119,6 +3119,14 @@ extern "C" void Randomizer_ShowRandomizerMenu() {
     SohGui::ShowRandomizerSettingsMenu();
 }
 
+extern "C" void SohMenu_ShowPage(const char* header, const char* sidebar) {
+    SohGui::mSohMenu->ShowLocked(header, sidebar);
+}
+
+extern "C" uint8_t SohMenu_IsLockedOpen() {
+    return SohGui::mSohMenu->IsLocked();
+}
+
 extern "C" void EntranceTracker_SetCurrentGrottoID(s16 entranceIndex) {
     EntranceTracker::SetCurrentGrottoIDForTracker(entranceIndex);
 }

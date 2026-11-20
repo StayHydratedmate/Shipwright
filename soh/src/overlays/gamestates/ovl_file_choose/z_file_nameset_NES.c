@@ -1,10 +1,13 @@
 #include "file_choose.h"
+#include <stdio.h>
 #include "textures/title_static/title_static.h"
 #include "assets/overlays/ovl_File_Choose/ovl_file_choose.h"
 #include "assets/soh_assets.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 #include "soh/SaveManager.h"
 #include "soh/ResourceManagerHelpers.h"
+#include "soh/OTRGlobals.h"
+#include "textures/message_static/message_static.h"
 
 // File based on matching decomp for z_file_nameset_NES on N64 1.0 https://decomp.me/scratch/1tru6
 // Edited to follow port's stage of documentation and implemented enhancements found in z_file_nameset_PAL.c
@@ -992,11 +995,27 @@ void FileChoose_StartOptionsNES(GameState* thisx) {
 
 static u8 sSelectedSetting;
 
+// #region Custom build: extra "Settings" row that opens one SoH menu page (locked, no switching).
+// To change the list, edit these three arrays. Header/sidebar names must match the SoH menu exactly.
+#define FS_SETTING_PAGES 2
+#define FS_OPTION_ROW_COUNT 3
+static const char* sSettingsPageLabel[] = { "Quality of Life", "Skips & Speed-ups", "Difficulty", "Graphics" };
+static const char* sSettingsPageHeader[] = { "Enhancements", "Enhancements", "Enhancements", "Enhancements" };
+static const char* sSettingsPageSidebar[] = { "Quality of Life", "Skips & Speed-ups", "Difficulty", "Graphics" };
+#define SETTINGS_PAGE_COUNT (sizeof(sSettingsPageLabel) / sizeof(sSettingsPageLabel[0]))
+static u8 sSettingsPageIndex = 0;
+// #endregion
+
 void FileChoose_UpdateOptionsMenuNES(GameState* thisx) {
     FileChooseContext* this = (FileChooseContext*)thisx;
     // SramContext* sramCtx = &this->sramCtx;
     Input* input = &this->state.input[0];
     bool dpad = CVarGetInteger(CVAR_SETTING("DpadInText"), 0);
+
+    // Custom build: ignore the file select while a settings page is open.
+    if (SohMenu_IsLockedOpen()) {
+        return;
+    }
 
     if (CHECK_BTN_ALL(input->press.button, BTN_B)) {
         Audio_PlaySoundGeneral(NA_SE_SY_FSEL_DECIDE_L, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale,
@@ -1033,8 +1052,10 @@ void FileChoose_UpdateOptionsMenuNES(GameState* thisx) {
             if (gSaveContext.audioSetting > 0xF0) {
                 gSaveContext.audioSetting = FS_AUDIO_SURROUND;
             }
-        } else {
+        } else if (sSelectedSetting == FS_SETTING_TARGET) {
             gSaveContext.zTargetSetting ^= 1;
+        } else if (sSelectedSetting == FS_SETTING_PAGES) {
+            sSettingsPageIndex = (sSettingsPageIndex + SETTINGS_PAGE_COUNT - 1) % SETTINGS_PAGE_COUNT;
         }
     } else if ((this->stickRelX > 30) || (dpad && CHECK_BTN_ALL(input->press.button, BTN_DRIGHT))) {
         Audio_PlaySoundGeneral(NA_SE_SY_FSEL_CURSOR, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale,
@@ -1046,8 +1067,10 @@ void FileChoose_UpdateOptionsMenuNES(GameState* thisx) {
             if (gSaveContext.audioSetting > FS_AUDIO_SURROUND) {
                 gSaveContext.audioSetting = FS_AUDIO_STEREO;
             }
-        } else {
+        } else if (sSelectedSetting == FS_SETTING_TARGET) {
             gSaveContext.zTargetSetting ^= 1;
+        } else if (sSelectedSetting == FS_SETTING_PAGES) {
+            sSettingsPageIndex = (sSettingsPageIndex + 1) % SETTINGS_PAGE_COUNT;
         }
     }
 
@@ -1055,11 +1078,19 @@ void FileChoose_UpdateOptionsMenuNES(GameState* thisx) {
         (dpad && CHECK_BTN_ANY(input->press.button, BTN_DDOWN | BTN_DUP))) {
         Audio_PlaySoundGeneral(NA_SE_SY_FSEL_CURSOR, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale,
                                &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
-        sSelectedSetting ^= 1;
+        if ((this->stickRelY < -30) || (dpad && CHECK_BTN_ALL(input->press.button, BTN_DDOWN))) {
+            sSelectedSetting = (sSelectedSetting + 1) % FS_OPTION_ROW_COUNT;
+        } else {
+            sSelectedSetting = (sSelectedSetting + FS_OPTION_ROW_COUNT - 1) % FS_OPTION_ROW_COUNT;
+        }
     } else if (CHECK_BTN_ALL(input->press.button, BTN_A)) {
         Audio_PlaySoundGeneral(NA_SE_SY_FSEL_DECIDE_L, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale,
                                &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
-        sSelectedSetting ^= 1;
+        if (sSelectedSetting == FS_SETTING_PAGES) {
+            SohMenu_ShowPage(sSettingsPageHeader[sSettingsPageIndex], sSettingsPageSidebar[sSettingsPageIndex]);
+        } else {
+            sSelectedSetting = (sSelectedSetting + 1) % FS_OPTION_ROW_COUNT;
+        }
     }
 
     if (sSelectedSetting == FS_SETTING_AUDIO) {
@@ -1224,7 +1255,7 @@ void FileChoose_DrawOptionsImplNES(GameState* thisx) {
         gDPPipeSync(POLY_OPA_DISP++);
 
         if (i == (gSaveContext.zTargetSetting + 4)) {
-            if (sSelectedSetting != FS_SETTING_AUDIO) {
+            if (sSelectedSetting == FS_SETTING_TARGET) {
                 gDPSetPrimColor(POLY_OPA_DISP++, 0, 0, cursorPrimRed, cursorPrimGreen, cursorPrimBlue,
                                 this->titleAlpha[0]);
                 gDPSetEnvColor(POLY_OPA_DISP++, cursorEnvRed, cursorEnvGreen, cursorEnvBlue, 0xFF);
@@ -1298,6 +1329,34 @@ void FileChoose_DrawOptionsImplNES(GameState* thisx) {
     gSPVertex(POLY_OPA_DISP++, gOptionsDividerBottomVtx, 4, 0);
     gSP1Quadrangle(POLY_OPA_DISP++, 0, 2, 3, 1, 0);
     Matrix_Pop();
+
+    // #region Custom build: "Settings" row, drawn in a text box at the bottom of the screen.
+    // Only drawn while the Options screen is fully shown (not while it rotates in or out).
+    if (this->configMode == CM_OPTIONS_MENU) {
+        static char sSettingsRowText[64];
+        u8 alpha = this->titleAlpha[0];
+        u8 selected = (sSelectedSetting == FS_SETTING_PAGES);
+        s16 boxHeight = 24;
+        s16 boxBottom = 4;
+
+        Gfx_SetupDL_39Opa(this->state.gfxCtx);
+        gDPSetAlphaDither(POLY_OPA_DISP++, G_AD_DISABLE);
+        gSPClearGeometryMode(POLY_OPA_DISP++, G_SHADE);
+        gDPSetCombineLERP(POLY_OPA_DISP++, 0, 0, 0, PRIMITIVE, TEXEL0, 0, PRIMITIVE, 0, 0, 0, 0, PRIMITIVE, TEXEL0, 0,
+                          PRIMITIVE, 0);
+        gDPSetPrimColor(POLY_OPA_DISP++, 0, 0, 0, 0, 0, alpha);
+        gDPLoadTextureBlock_4b(POLY_OPA_DISP++, gDefaultMessageBackgroundTex, G_IM_FMT_I, 128, 64, 0, G_TX_MIRROR,
+                               G_TX_MIRROR, 7, 0, G_TX_NOLOD, G_TX_NOLOD);
+        gSPTextureRectangle(POLY_OPA_DISP++, 32 << 2, (SCREEN_HEIGHT - boxHeight - boxBottom) << 2,
+                            (SCREEN_WIDTH - 32) << 2, (SCREEN_HEIGHT - boxBottom) << 2, G_TX_RENDERTILE, 0, 0, 1 << 10,
+                            (s16)(512 / ((f32)boxHeight / 64) + 0.5f) << 1);
+
+        snprintf(sSettingsRowText, sizeof(sSettingsRowText), "Settings:  < %s >",
+                 sSettingsPageLabel[sSettingsPageIndex]);
+        Interface_DrawTextLine(this->state.gfxCtx, sSettingsRowText, 40, SCREEN_HEIGHT - boxHeight - boxBottom + 6, 255,
+                               255, selected ? 80 : 255, alpha, 0.8f, 1);
+    }
+    // #endregion
 
     CLOSE_DISPS(this->state.gfxCtx);
 }

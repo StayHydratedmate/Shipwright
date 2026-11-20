@@ -258,9 +258,8 @@ bool DismissPopup(std::string title) {
 }
 
 void ShowRandomizerSettingsMenu() {
-    CVarSetString(CVAR_SETTING("Menu.ActiveHeader"), "Randomizer");
-    CVarSetString(CVAR_SETTING("Menu.RandomizerSidebarSection"), "General");
-    mSohMenu->Show();
+    // Custom build: open only the Randomizer > General page (seed settings + Generate button).
+    mSohMenu->ShowLocked("Randomizer", "General");
 }
 
 void ShowEscMenu() {

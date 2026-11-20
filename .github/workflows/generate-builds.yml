@@ -1,6 +1,7 @@
 name: generate-builds
 on:
   push:
+    branches-ignore: [custom-menu] # custom build uses wiiu-build.yml instead
   pull_request:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

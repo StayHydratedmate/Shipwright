@@ -567,6 +567,39 @@ void Menu::Draw() {
 }
 
 static bool freshOpen = true;
+void Menu::ShowLocked(const std::string& header, const std::string& sidebar) {
+    if (!menuEntries.contains(header) || !menuEntries.at(header).sidebars.contains(sidebar)) {
+        return;
+    }
+    locked = true;
+    lockedHeader = header;
+    lockedSidebar = sidebar;
+    menuSearch.Clear();
+    CVarSetString(CVAR_SETTING("Menu.ActiveHeader"), header.c_str());
+    CVarSetString(menuEntries.at(header).sidebarCvar, sidebar.c_str());
+    // Controller drives the menu, and game input is blocked while it is open.
+    CVarSetInteger(CVAR_IMGUI_CONTROLLER_NAV, 1);
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    Show();
+}
+
+bool Menu::IsLocked() {
+    return locked && IsVisible();
+}
+
+void Menu::CloseLocked() {
+    locked = false;
+    Hide();
+    CVarSave();
+    auto mImGuiIo = &ImGui::GetIO();
+    if (CVarGetInteger(CVAR_IMGUI_CONTROLLER_NAV, 0) &&
+        Ship::Context::GetInstance()->GetWindow()->GetGui()->GetMenuOrMenubarVisible()) {
+        mImGuiIo->ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    } else {
+        mImGuiIo->ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+    }
+}
+
 void Menu::DrawElement() {
     if (OTRGlobals::Instance->fontStandardLargest == nullptr) {
         return;
@@ -575,6 +608,16 @@ void Menu::DrawElement() {
         info.active = info.evaluation(info);
     }
     const char* headerCvar = CVAR_SETTING("Menu.ActiveHeader");
+
+    if (locked && !IsVisible()) {
+        locked = false;
+    }
+    if (locked) {
+        // Re-apply the locked page every frame so nothing can switch away from it.
+        navigateToWidget = false;
+        CVarSetString(headerCvar, lockedHeader.c_str());
+        CVarSetString(menuEntries.at(lockedHeader).sidebarCvar, lockedSidebar.c_str());
+    }
 
     if (navigateToWidget) {
         if (menuEntries.contains(navigateMainEntry) &&
@@ -593,7 +636,7 @@ void Menu::DrawElement() {
     windowHeight = ImGui::GetMainViewport()->WorkSize.y;
     windowWidth = ImGui::GetMainViewport()->WorkSize.x;
     auto windowFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
-    bool popout = CVarGetInteger(CVAR_SETTING("Menu.Popout"), 0) && allowPopout;
+    bool popout = !locked && CVarGetInteger(CVAR_SETTING("Menu.Popout"), 0) && allowPopout;
     if (popout) {
         windowFlags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoDocking;
     }
@@ -660,7 +703,7 @@ void Menu::DrawElement() {
     float centerX = pos.x + windowWidth / 2 - (style.ItemSpacing.x * (menuEntries.size() + 1));
     std::vector<ImVec2> headerSizes;
     float headerWidth = 0.0f;
-    bool headerSearch = !CVarGetInteger(CVAR_SETTING("Menu.SidebarSearch"), 0);
+    bool headerSearch = !locked && !CVarGetInteger(CVAR_SETTING("Menu.SidebarSearch"), 0);
     if (headerSearch) {
         headerWidth += 200.0f;
     }
@@ -704,36 +747,43 @@ void Menu::DrawElement() {
     ImGui::BeginChild("Header Selection", headerSelSize,
                       ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize,
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_HorizontalScrollbar);
-    uint8_t curIndex = 0;
-    for (auto& label : menuOrder) {
-        if (curIndex != 0) {
-            ImGui::SameLine();
-        }
-        auto& entry = menuEntries.at(label);
-        std::string nextIndex = label;
-        UIWidgets::PushStyleButton(menuThemeIndex);
-        if (headerIndex != label) {
-            ImGui::PushStyleColor(ImGuiCol_Button, { 0, 0, 0, 0 });
-        }
-        if (ModernMenuHeaderEntry(entry.label)) {
-            if (headerSearch) {
-                menuSearch.Clear();
+    if (locked) {
+        // Locked page: show its name instead of the header tabs.
+        sidebar = &menuEntries.at(headerIndex).sidebars;
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("%s", lockedSidebar.c_str());
+    } else {
+        uint8_t curIndex = 0;
+        for (auto& label : menuOrder) {
+            if (curIndex != 0) {
+                ImGui::SameLine();
             }
-            CVarSetString(headerCvar, label.c_str());
-            CVarSave();
-            nextIndex = label;
+            auto& entry = menuEntries.at(label);
+            std::string nextIndex = label;
+            UIWidgets::PushStyleButton(menuThemeIndex);
+            if (headerIndex != label) {
+                ImGui::PushStyleColor(ImGuiCol_Button, { 0, 0, 0, 0 });
+            }
+            if (ModernMenuHeaderEntry(entry.label)) {
+                if (headerSearch) {
+                    menuSearch.Clear();
+                }
+                CVarSetString(headerCvar, label.c_str());
+                CVarSave();
+                nextIndex = label;
+            }
+            if (headerIndex != label) {
+                ImGui::PopStyleColor();
+            }
+            UIWidgets::PopStyleButton();
+            if (headerIndex == label) {
+                sidebar = &entry.sidebars;
+            }
+            if (nextIndex != label) {
+                headerIndex = nextIndex;
+            }
+            curIndex++;
         }
-        if (headerIndex != label) {
-            ImGui::PopStyleColor();
-        }
-        UIWidgets::PopStyleButton();
-        if (headerIndex == label) {
-            sidebar = &entry.sidebars;
-        }
-        if (nextIndex != label) {
-            headerIndex = nextIndex;
-        }
-        curIndex++;
     }
     std::string menuSearchText = "";
     if (headerSearch) {
@@ -756,49 +806,62 @@ void Menu::DrawElement() {
         ImGui::PopStyleColor();
     }
     ImGui::EndChild();
-    ImGui::SameLine(menuSize.x - (buttonSize.x * 3) - (style.ItemSpacing.x * 2));
-    UIWidgets::ButtonOptions options3 = {};
-    options3.color = UIWidgets::Colors::Red;
-    options3.size = UIWidgets::Sizes::Inline;
-    options3.tooltip = "Quit SoH";
-    if (UIWidgets::Button(ICON_FA_POWER_OFF, options3)) {
-        SohGui::mModalWindow->RegisterPopup(
-            "Quit SoH", "Are you sure you want to quit SoH?", "Quit", "Cancel",
-            []() {
-                std::shared_ptr<Menu> menu =
-                    static_pointer_cast<Menu>(Ship::Context::GetInstance()->GetWindow()->GetGui()->GetMenu());
-                if (!menu->IsMenuPopped()) {
-                    menu->ToggleVisibility();
-                }
-                Ship::Context::GetInstance()->GetWindow()->Close();
-            },
-            nullptr);
-    }
-    ImGui::PopStyleVar();
-    ImGui::SameLine();
-    UIWidgets::ButtonOptions options2 = {};
-    options2.color = UIWidgets::Colors::Red;
-    options2.size = UIWidgets::Sizes::Inline;
-    options2.tooltip = "Reset"
+    if (!locked) {
+        ImGui::SameLine(menuSize.x - (buttonSize.x * 3) - (style.ItemSpacing.x * 2));
+        UIWidgets::ButtonOptions options3 = {};
+        options3.color = UIWidgets::Colors::Red;
+        options3.size = UIWidgets::Sizes::Inline;
+        options3.tooltip = "Quit SoH";
+        if (UIWidgets::Button(ICON_FA_POWER_OFF, options3)) {
+            SohGui::mModalWindow->RegisterPopup(
+                "Quit SoH", "Are you sure you want to quit SoH?", "Quit", "Cancel",
+                []() {
+                    std::shared_ptr<Menu> menu =
+                        static_pointer_cast<Menu>(Ship::Context::GetInstance()->GetWindow()->GetGui()->GetMenu());
+                    if (!menu->IsMenuPopped()) {
+                        menu->ToggleVisibility();
+                    }
+                    Ship::Context::GetInstance()->GetWindow()->Close();
+                },
+                nullptr);
+        }
+        ImGui::PopStyleVar();
+        ImGui::SameLine();
+        UIWidgets::ButtonOptions options2 = {};
+        options2.color = UIWidgets::Colors::Red;
+        options2.size = UIWidgets::Sizes::Inline;
+        options2.tooltip = "Reset"
 #ifdef __APPLE__
-                       " (Command-R)"
+                           " (Command-R)"
 #elif !defined(__SWITCH__) && !defined(__WIIU__)
-                       " (Ctrl+R)"
+                           " (Ctrl+R)"
 #else
-                       ""
+                           ""
 #endif
-        ;
-    if (UIWidgets::Button(ICON_FA_UNDO, options2)) {
-        std::reinterpret_pointer_cast<Ship::ConsoleWindow>(
-            Ship::Context::GetInstance()->GetWindow()->GetGui()->GetGuiWindow("Console"))
-            ->Dispatch("reset");
+            ;
+        if (UIWidgets::Button(ICON_FA_UNDO, options2)) {
+            std::reinterpret_pointer_cast<Ship::ConsoleWindow>(
+                Ship::Context::GetInstance()->GetWindow()->GetGui()->GetGuiWindow("Console"))
+                ->Dispatch("reset");
+        }
+        ImGui::SameLine();
+    } else {
+        ImGui::PopStyleVar(); // FramePadding pushed above (normally popped after the Quit button)
+        ImGui::SameLine(menuSize.x - buttonSize.x);
     }
-    ImGui::SameLine();
     UIWidgets::ButtonOptions options = {};
     options.size = UIWidgets::Sizes::Inline;
     options.tooltip = "Close Menu (Esc)";
-    if (UIWidgets::Button(ICON_FA_TIMES_CIRCLE, options)) {
-        ToggleVisibility();
+    if (locked) {
+        options.tooltip = "Close (Plus)";
+    }
+    if (UIWidgets::Button(ICON_FA_TIMES_CIRCLE, options) ||
+        (locked && ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false))) {
+        if (locked) {
+            closeLockedAfterDraw = true;
+        } else {
+            ToggleVisibility();
+        }
 
         // Update gamepad navigation after close based on if other menus are still visible
         auto mImGuiIo = &ImGui::GetIO();
@@ -837,6 +900,9 @@ void Menu::DrawElement() {
     ImGui::BeginChild((menuEntries.at(headerIndex).label + " Section").c_str(), { sidebarWidth, columnHeight * 3 },
                       ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize, ImGuiWindowFlags_NoTitleBar);
     for (auto& sidebarLabel : menuEntries.at(headerIndex).sidebarOrder) {
+        if (locked && sidebarLabel != lockedSidebar) {
+            continue;
+        }
         std::string nextIndex = "";
         UIWidgets::PushStyleButton(menuThemeIndex);
         if (sectionIndex != sidebarLabel) {
@@ -947,5 +1013,9 @@ void Menu::DrawElement() {
         freshOpen = false;
     }
     ImGui::End();
+    if (closeLockedAfterDraw) {
+        closeLockedAfterDraw = false;
+        CloseLocked();
+    }
 }
 } // namespace Ship

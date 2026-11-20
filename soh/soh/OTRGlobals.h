@@ -226,6 +226,9 @@ uint8_t Randomizer_IsSpoilerLoaded();
 void Randomizer_SetSpoilerLoaded(bool spoilerLoaded);
 uint8_t Randomizer_GenerateRandomizer();
 void Randomizer_ShowRandomizerMenu();
+// Custom build: open one SoH menu page (locked, no switching). Used by the file select Options screen.
+void SohMenu_ShowPage(const char* header, const char* sidebar);
+uint8_t SohMenu_IsLockedOpen();
 GetItemEntry ItemTable_Retrieve(int16_t getItemID);
 GetItemEntry ItemTable_RetrieveEntry(s16 modIndex, s16 getItemID);
 void EntranceTracker_SetCurrentGrottoID(s16 entranceIndex);

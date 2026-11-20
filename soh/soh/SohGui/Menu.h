@@ -28,6 +28,9 @@ class Menu : public GuiWindow {
     void AddMenuEntry(std::string entryName, const char* entryCvar);
     void AddSearchWidget(SearchWidget widget);
     std::unordered_map<uint32_t, disabledInfo>& GetDisabledMap();
+    // Opens the menu on one page only (no header tabs, no sidebar switching, no search).
+    void ShowLocked(const std::string& header, const std::string& sidebar);
+    bool IsLocked();
 
   protected:
     ImVec2 mOriginalSize;
@@ -61,6 +64,11 @@ class Menu : public GuiWindow {
     float windowHeight;
     float windowWidth;
     UIWidgets::Colors menuThemeIndex;
+    bool locked = false;
+    bool closeLockedAfterDraw = false;
+    std::string lockedHeader;
+    std::string lockedSidebar;
+    void CloseLocked();
 };
 } // namespace Ship
 
